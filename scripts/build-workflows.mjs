@@ -304,3 +304,135 @@ const generatorWorkflow = {
 mkdirSync(join(root, 'workflows'), { recursive: true });
 writeFileSync(join(root, 'workflows', 'personal-audio-brief.json'), `${JSON.stringify(generatorWorkflow, null, 2)}\n`);
 console.log('built workflows/personal-audio-brief.json');
+
+// ============================================================================
+// Finance brief — parallel pipeline. Sources: 3 PL finance YouTube channels +
+// Bankier.pl/MarketWatch RSS. TTS: ElevenLabs (mp3) -> GCS upload -> signed link
+// -> Slack #finance-news. Linear chain (ElevenLabs is synchronous, no LRO).
+// ============================================================================
+
+const ELEVEN_CRED_ID = 'Z3FR1wCa5D4NlRQo';     // n8n httpHeaderAuth "ElevenLabs API"
+const ELEVEN_VOICE = 'onwK4e9ZLuTAKqWW03F9';   // Daniel - Steady Broadcaster
+
+const financeNodes = [
+  {
+    id: 'fin-schedule', name: 'Weekly schedule', type: 'n8n-nodes-base.scheduleTrigger', typeVersion: 1.3,
+    position: [-1040, 0],
+    parameters: { rule: { interval: [{ field: 'cronExpression', expression: '0 8 * * 1' }] } }
+  },
+  codeNode('fin-init-state', 'Init state', 'init-state.js', [-860, 0]),
+  codeNode('fin-build-source-urls', 'Build source URLs', 'fin-build-source-urls.js', [-680, 0]),
+  {
+    id: 'fin-fetch-source', name: 'Fetch source', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.4,
+    position: [-500, 0], retryOnFail: true, maxTries: 3, waitBetweenTries: 2000, onError: 'continueRegularOutput',
+    parameters: {
+      method: 'GET', url: '={{$json.url}}',
+      sendHeaders: true,
+      headerParameters: { parameters: [{ name: 'User-Agent', value: 'finance-brief-bot/0.1' }] },
+      options: { response: { response: { responseFormat: 'text' } }, batching: { batch: { batchSize: 3, batchInterval: 500 } } }
+    }
+  },
+  codeNode('fin-parse-candidates', 'Parse candidates', 'fin-parse-candidates.js', [-320, 0]),
+  codeNode('fin-build-filter-input', 'Build filter input', 'fin-build-filter-input.js', [-140, 0]),
+  tokenNode('fin-token-filter', 'Get GCP token filter', [40, 0]),
+  llmNode('fin-llm-filter', 'LLM filter cheap', [220, 0], 'LLM_MODEL_CHEAP', 'Build filter input', 'Get GCP token filter'),
+  codeNode('fin-parse-select', 'Parse selected', 'parse-select.js', [400, 0]),
+  codeNode('fin-enrich', 'Enrich', 'fin-enrich.js', [580, 0]),
+  codeNode('fin-build-summary-input', 'Build summary input', 'build-summary-input.js', [760, 0]),
+  tokenNode('fin-token-summary', 'Get GCP token summary', [940, 0]),
+  llmNode('fin-llm-summary', 'LLM summarize cheap', [1120, 0], 'LLM_MODEL_CHEAP', 'Build summary input', 'Get GCP token summary'),
+  codeNode('fin-parse-summaries', 'Parse summaries', 'parse-summaries.js', [1300, 0]),
+  codeNode('fin-build-script-input', 'Build script input', 'fin-build-script-input.js', [1480, 0]),
+  tokenNode('fin-token-script', 'Get GCP token script', [1660, 0]),
+  llmNode('fin-llm-script', 'LLM script strong', [1840, 0], 'LLM_MODEL_STRONG', 'Build script input', 'Get GCP token script'),
+  codeNode('fin-parse-script', 'Parse script', 'parse-script.js', [2020, 0]),
+  codeNode('fin-build-tts', 'Build TTS request', 'fin-build-tts.js', [2200, 0]),
+  tokenNode('fin-token-upload', 'Get GCP token upload', [2380, 0]),
+  {
+    id: 'fin-elevenlabs', name: 'ElevenLabs TTS', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.4,
+    position: [2560, 0], retryOnFail: true, maxTries: 2, waitBetweenTries: 3000,
+    credentials: { httpHeaderAuth: { id: ELEVEN_CRED_ID, name: 'ElevenLabs API' } },
+    parameters: {
+      method: 'POST',
+      url: `https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE}`,
+      authentication: 'genericCredentialType', genericAuthType: 'httpHeaderAuth',
+      sendHeaders: true,
+      headerParameters: { parameters: [
+        { name: 'Accept', value: 'audio/mpeg' },
+        { name: 'Content-Type', value: 'application/json' } ] },
+      sendBody: true, specifyBody: 'json',
+      jsonBody: '={{JSON.stringify($node["Build TTS request"].json.requestBody)}}',
+      options: { response: { response: { responseFormat: 'file', outputPropertyName: 'audio' } } }
+    }
+  },
+  {
+    id: 'fin-gcs-upload', name: 'Upload to GCS', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.4,
+    position: [2740, 0], retryOnFail: true, maxTries: 3, waitBetweenTries: 2000,
+    parameters: {
+      method: 'POST',
+      url: '={{"https://storage.googleapis.com/upload/storage/v1/b/" + $node["Build TTS request"].json.bucket + "/o?uploadType=media&name=" + encodeURIComponent($node["Build TTS request"].json.objectName)}}',
+      sendHeaders: true,
+      headerParameters: { parameters: [
+        { name: 'Authorization', value: '=Bearer {{$node["Get GCP token upload"].json.access_token}}' },
+        { name: 'Content-Type', value: 'audio/mpeg' } ] },
+      sendBody: true, contentType: 'binaryData', inputDataFieldName: 'audio',
+      options: {}
+    }
+  },
+  codeNode('fin-build-signed-url', 'Build signed url', 'fin-build-signed-url.js', [2920, 0]),
+  tokenNode('fin-token-sign', 'Get GCP token sign', [3100, 0]),
+  {
+    id: 'fin-sign-blob', name: 'Sign blob', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.4,
+    position: [3280, 0], retryOnFail: true, maxTries: 3, waitBetweenTries: 2000,
+    parameters: {
+      method: 'POST',
+      url: 'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/maths-vm-sa@data-concept-studio.iam.gserviceaccount.com:signBlob',
+      sendHeaders: true,
+      headerParameters: { parameters: [
+        { name: 'Authorization', value: '=Bearer {{$node["Get GCP token sign"].json.access_token}}' },
+        { name: 'Content-Type', value: 'application/json' } ] },
+      sendBody: true, specifyBody: 'json',
+      jsonBody: '={{JSON.stringify({ payload: $node["Build signed url"].json.payloadB64 })}}',
+      options: { response: { response: { responseFormat: 'json' } } }
+    }
+  },
+  codeNode('fin-assemble-signed-url', 'Assemble signed url', 'assemble-signed-url.js', [3460, 0]),
+  codeNode('fin-build-slack-digest', 'Build Slack digest', 'fin-build-slack-digest.js', [3640, 0]),
+  {
+    id: 'fin-slack-post', name: 'Post to finance-news', type: 'n8n-nodes-base.slack', typeVersion: 2.4,
+    position: [3820, 0],
+    credentials: { slackApi: { id: 'wzM8zIUgZuaGOwgg', name: 'MATHS Slack Bot' } },
+    parameters: {
+      resource: 'message', operation: 'post', select: 'channel',
+      channelId: { __rl: true, mode: 'id', value: '={{$json.channel}}' },
+      text: '={{$json.text}}',
+      otherOptions: { unfurl_links: false, unfurl_media: false }
+    }
+  },
+  codeNode('fin-commit-state', 'Commit state', 'commit-state.js', [4000, 0])
+];
+
+const financeChain = [
+  'Weekly schedule', 'Init state', 'Build source URLs', 'Fetch source', 'Parse candidates',
+  'Build filter input', 'Get GCP token filter', 'LLM filter cheap', 'Parse selected', 'Enrich',
+  'Build summary input', 'Get GCP token summary', 'LLM summarize cheap', 'Parse summaries',
+  'Build script input', 'Get GCP token script', 'LLM script strong', 'Parse script',
+  'Build TTS request', 'Get GCP token upload', 'ElevenLabs TTS', 'Upload to GCS',
+  'Build signed url', 'Get GCP token sign', 'Sign blob', 'Assemble signed url',
+  'Build Slack digest', 'Post to finance-news', 'Commit state'
+];
+
+const financeWorkflow = {
+  name: 'Finance Brief - GCS + Slack (ElevenLabs)',
+  nodes: financeNodes,
+  connections: connect(financeChain),
+  settings: {
+    executionOrder: 'v1',
+    timezone: 'Europe/Warsaw',
+    saveDataErrorExecution: 'all',
+    saveDataSuccessExecution: 'none'
+  }
+};
+
+writeFileSync(join(root, 'workflows', 'finance-brief.json'), `${JSON.stringify(financeWorkflow, null, 2)}\n`);
+console.log('built workflows/finance-brief.json');

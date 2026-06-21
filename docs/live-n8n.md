@@ -8,9 +8,18 @@ Imported workflows:
 | Workflow | ID | Active |
 |---|---:|---:|
 | AI News Brief - GCS + Slack | `JdKu1ZzS1SFZ6Ysa` | **true** (live since 2026-06-21) |
+| Finance Brief - GCS + Slack (ElevenLabs) | `49dxEXJVxTEQskov` | **true** (live since 2026-06-21) |
 
-GCP-native flow: Vertex Gemini (filter/summarize/script) -> Cloud TTS Long Audio -> GCS (WAV) ->
-V4 signed link + headline digest to Slack `#ai-news` (`C0BCWHAHJRW`). Runs weekly, Mon 07:00 Europe/Warsaw.
+**AI brief** — Vertex Gemini (filter/summarize/script) -> Cloud TTS Long Audio -> GCS (WAV) ->
+V4 signed link + digest to Slack `#ai-news` (`C0BCWHAHJRW`). Weekly, Mon 07:00 Europe/Warsaw.
+
+**Finance brief** (parallel pipeline) — sources: 3 PL finance YouTube channels (DNA Rynków, FxMag,
+Zawód Inwestor) + Bankier.pl / MarketWatch RSS -> Vertex Gemini (finance profile, short ~300-word PL script)
+-> **ElevenLabs** `eleven_multilingual_v2` (voice Daniel, `language_code: pl`) mp3 -> GCS upload ->
+V4 signed link + digest to Slack `#finance-news` (`C0BBWESNQ4B`). Weekly, Mon 08:00 Europe/Warsaw.
+ElevenLabs key is an n8n `httpHeaderAuth` credential (`ElevenLabs API`, id `Z3FR1wCa5D4NlRQo`), domain-scoped
+to `api.elevenlabs.io`; a hard char-cap in `fin-build-tts.js` protects the free-tier quota.
+
 Config is baked as node literals (see runtime notes), so no n8n env vars / container restart are required.
 
 ## First-run verification (2026-06-21)

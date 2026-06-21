@@ -21,8 +21,23 @@ const requiredFiles = [
   'snippets/code/assemble-signed-url.js',
   'snippets/code/build-slack-digest.js',
   'snippets/code/commit-state.js',
-  'workflows/personal-audio-brief.json'
+  'snippets/code/fin-build-source-urls.js',
+  'snippets/code/fin-parse-candidates.js',
+  'snippets/code/fin-build-filter-input.js',
+  'snippets/code/fin-enrich.js',
+  'snippets/code/fin-build-script-input.js',
+  'snippets/code/fin-build-tts.js',
+  'snippets/code/fin-build-signed-url.js',
+  'snippets/code/fin-build-slack-digest.js',
+  'workflows/personal-audio-brief.json',
+  'workflows/finance-brief.json'
 ];
+
+// per-workflow required + banned node names
+const workflowChecks = {
+  'personal-audio-brief.json': { require: ['Post to ai-news', 'TTS synthesize long'], ban: ['ElevenLabs TTS', 'Upload audio to S3', 'Build RSS', 'Respond RSS', 'Feed webhook', 'Smoke webhook'] },
+  'finance-brief.json': { require: ['Post to finance-news', 'ElevenLabs TTS', 'Upload to GCS'], ban: ['Smoke webhook', 'Post to ai-news'] }
+};
 
 let failures = 0;
 
@@ -35,7 +50,7 @@ for (const file of requiredFiles) {
   if (!existsSync(join(root, file))) fail(`missing ${file}`);
 }
 
-for (const workflowFile of ['personal-audio-brief.json']) {
+for (const workflowFile of Object.keys(workflowChecks)) {
   const workflowPath = join(root, 'workflows', workflowFile);
   if (!existsSync(workflowPath)) continue;
   const workflow = JSON.parse(readFileSync(workflowPath, 'utf8'));
@@ -64,11 +79,12 @@ for (const workflowFile of ['personal-audio-brief.json']) {
     }
   }
 
-  // GCP/Slack delivery shape: Slack node present, legacy ElevenLabs/S3/RSS nodes gone.
-  if (!names.has('Post to ai-news')) fail(`${workflowFile}: missing Slack node "Post to ai-news"`);
-  if (!names.has('TTS synthesize long')) fail(`${workflowFile}: missing Long Audio node "TTS synthesize long"`);
-  for (const banned of ['ElevenLabs TTS', 'Upload audio to S3', 'Build RSS', 'Respond RSS', 'Feed webhook']) {
-    if (names.has(banned)) fail(`${workflowFile}: still contains removed node "${banned}"`);
+  if (JSON.stringify(workflow).includes('$env')) fail(`${workflowFile}: references $env (blocked on this n8n)`);
+  for (const req of workflowChecks[workflowFile].require) {
+    if (!names.has(req)) fail(`${workflowFile}: missing required node "${req}"`);
+  }
+  for (const banned of workflowChecks[workflowFile].ban) {
+    if (names.has(banned)) fail(`${workflowFile}: contains banned node "${banned}"`);
   }
 }
 

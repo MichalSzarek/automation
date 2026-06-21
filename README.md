@@ -1,8 +1,13 @@
 # automation
 
-Repo-managed n8n automation for a Polish AI-news audio brief, running **end-to-end on GCP**:
-YouTube RSS + HackerNews -> Vertex Gemini filtering/summarization/script -> Google Cloud TTS
-(Long Audio) -> GCS -> a headline digest + signed audio link posted to Slack `#ai-news`.
+Repo-managed n8n automation for Polish audio briefs, running **end-to-end on GCP**. Two parallel pipelines:
+
+- **AI brief** — YouTube RSS + HackerNews -> Vertex Gemini -> Google Cloud TTS (Long Audio) -> GCS ->
+  headline digest + signed audio link to Slack `#ai-news`.
+- **Finance brief** — 3 PL finance YouTube channels + Bankier.pl/MarketWatch RSS -> Vertex Gemini ->
+  **ElevenLabs** (mp3) -> GCS -> digest + signed link to Slack `#finance-news`.
+
+Both generate `workflows/*.json` from `scripts/build-workflows.mjs` + `snippets/code/*.js`.
 
 The execution contract lives in [n8n-brief-audio-spec.md](./n8n-brief-audio-spec.md).
 Design + plan for the GCP/Slack rework: [docs/superpowers/specs](./docs/superpowers/specs) and
