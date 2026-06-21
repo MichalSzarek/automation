@@ -33,7 +33,7 @@ function tokenNode(id, name, position) {
     waitBetweenTries: 2000,
     parameters: {
       method: 'GET',
-      url: '={{$env.GCP_TOKEN_URL || "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"}}',
+      url: 'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token',
       sendHeaders: true,
       headerParameters: {
         parameters: [
@@ -48,6 +48,8 @@ function tokenNode(id, name, position) {
 }
 
 function llmNode(id, name, position, modelEnv, requestNodeName, tokenNodeName) {
+  // $env is blocked in this n8n (N8N_BLOCK_ENV_ACCESS_IN_NODE), so model/project are literal.
+  const model = modelEnv === 'LLM_MODEL_STRONG' ? 'gemini-2.5-pro' : 'gemini-2.5-flash';
   return {
     id,
     name,
@@ -59,7 +61,7 @@ function llmNode(id, name, position, modelEnv, requestNodeName, tokenNodeName) {
     waitBetweenTries: 2000,
     parameters: {
       method: 'POST',
-      url: `={{(($env.GCP_LOCATION || 'global') === 'global' ? 'https://aiplatform.googleapis.com' : 'https://' + $env.GCP_LOCATION + '-aiplatform.googleapis.com') + '/v1/projects/' + ($env.AUDIO_BRIEF_GCP_PROJECT_ID || 'data-concept-studio') + '/locations/' + ($env.GCP_LOCATION || 'global') + '/publishers/google/models/' + ($env.${modelEnv} || '${modelEnv === 'LLM_MODEL_STRONG' ? 'gemini-2.5-pro' : 'gemini-2.5-flash'}') + ':generateContent'}}`,
+      url: `https://aiplatform.googleapis.com/v1/projects/data-concept-studio/locations/global/publishers/google/models/${model}:generateContent`,
       sendHeaders: true,
       headerParameters: {
         parameters: [
@@ -98,7 +100,7 @@ const generatorNodes = [
         interval: [
           {
             field: 'cronExpression',
-            expression: '={{$env.AUDIO_BRIEF_CRON || "0 7 * * 1"}}'
+            expression: '0 7 * * 1'
           }
         ]
       }
@@ -128,10 +130,10 @@ const generatorNodes = [
 
   // --- Enrich: HN through HTTP fetch, YT placeholder, merge ---
   {
-    id: 'route-source', name: 'Route source', type: 'n8n-nodes-base.if', typeVersion: 2.2, position: [660, 0],
+    id: 'route-source', name: 'Route source', type: 'n8n-nodes-base.if', typeVersion: 2.3, position: [660, 0],
     parameters: {
       conditions: {
-        options: { caseSensitive: true, version: 2, leftValue: '' },
+        options: { caseSensitive: true, typeValidation: 'strict', leftValue: '', version: 2 },
         combinator: 'and',
         conditions: [{ id: 'is-hn', leftValue: '={{$json.source}}', rightValue: 'hn', operator: { type: 'string', operation: 'equals' } }]
       }
@@ -172,7 +174,7 @@ const generatorNodes = [
     position: [3180, 0], retryOnFail: true, maxTries: 3, waitBetweenTries: 2000,
     parameters: {
       method: 'POST',
-      url: "={{'https://texttospeech.googleapis.com/v1/projects/' + ($env.AUDIO_BRIEF_GCP_PROJECT_ID || 'data-concept-studio') + '/locations/' + ($env.TTS_LOCATION || 'us') + ':synthesizeLongAudio'}}",
+      url: 'https://texttospeech.googleapis.com/v1/projects/data-concept-studio/locations/us:synthesizeLongAudio',
       sendHeaders: true,
       headerParameters: { parameters: [
         { name: 'Authorization', value: '=Bearer {{$node["Get GCP token tts"].json.access_token}}' },
@@ -200,10 +202,10 @@ const generatorNodes = [
   },
   codeNode('poll-longaudio', 'Poll long audio', 'poll-longaudio.js', [3900, 0]),
   {
-    id: 'tts-done', name: 'TTS done?', type: 'n8n-nodes-base.if', typeVersion: 2.2, position: [4080, 0],
+    id: 'tts-done', name: 'TTS done?', type: 'n8n-nodes-base.if', typeVersion: 2.3, position: [4080, 0],
     parameters: {
       conditions: {
-        options: { caseSensitive: true, version: 2, leftValue: '' },
+        options: { caseSensitive: true, typeValidation: 'strict', leftValue: '', version: 2 },
         combinator: 'and',
         conditions: [{ id: 'done', leftValue: '={{$json.done}}', rightValue: true, operator: { type: 'boolean', operation: 'true', singleValue: true } }]
       }
@@ -218,7 +220,7 @@ const generatorNodes = [
     position: [4620, -160], retryOnFail: true, maxTries: 3, waitBetweenTries: 2000,
     parameters: {
       method: 'POST',
-      url: "={{'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/' + encodeURIComponent($env.AUDIO_BRIEF_SIGNER_SA || 'maths-vm-sa@data-concept-studio.iam.gserviceaccount.com') + ':signBlob'}}",
+      url: 'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/maths-vm-sa@data-concept-studio.iam.gserviceaccount.com:signBlob',
       sendHeaders: true,
       headerParameters: { parameters: [
         { name: 'Authorization', value: '=Bearer {{$node["Get GCP token sign"].json.access_token}}' },
@@ -233,7 +235,7 @@ const generatorNodes = [
   {
     id: 'slack-post', name: 'Post to ai-news', type: 'n8n-nodes-base.slack', typeVersion: 2.4,
     position: [5160, -160],
-    credentials: { slackApi: { id: '={{$env.SLACK_CREDENTIAL_ID || "wzM8zIUgZuaGOwgg"}}', name: 'MATHS Slack Bot' } },
+    credentials: { slackApi: { id: 'wzM8zIUgZuaGOwgg', name: 'MATHS Slack Bot' } },
     parameters: {
       resource: 'message', operation: 'post',
       select: 'channel',

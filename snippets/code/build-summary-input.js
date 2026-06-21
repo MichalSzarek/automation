@@ -27,7 +27,8 @@ return [{
       systemInstruction: { parts: [{ text: system }] },
       generationConfig: {
         temperature: 0.1,
-        maxOutputTokens: Number($env.GEMINI_MAX_OUTPUT_TOKENS || 4096),
+        maxOutputTokens: 8192,
+        thinkingConfig: { thinkingBudget: 0 },
         responseMimeType: 'application/json'
       }
     }

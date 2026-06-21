@@ -1,7 +1,7 @@
 // Build a GCS V4 (GOOG4-RSA-SHA256) signed-URL "string to sign". The RSA signature is
 // produced by IAM signBlob (next node), so no private key is ever stored. The only crypto
 // primitive needed client-side is SHA-256 of the canonical request, vendored below so this
-// works in the restricted n8n Code-node sandbox (no require(), no Buffer).
+// works in the restricted n8n Code-node sandbox (no Node modules, no Buffer).
 
 function sha256hex(ascii) {
   function rotr(n, x) { return (x >>> n) | (x << (32 - n)); }
@@ -70,11 +70,11 @@ function encPath(p) { return p.split('/').map(enc).join('/'); }
 function pad(n) { return String(n).padStart(2, '0'); }
 
 const carry = $input.first().json;
-const sa = $env.AUDIO_BRIEF_SIGNER_SA || 'maths-vm-sa@data-concept-studio.iam.gserviceaccount.com';
+const sa = 'maths-vm-sa@data-concept-studio.iam.gserviceaccount.com';
 const bucket = carry.bucket;
 const object = carry.objectName;
-const ttl = Math.min(Number($env.SIGNED_URL_TTL_SECONDS || 604800), 604800);
-const region = $env.SIGNED_URL_REGION || 'auto';
+const ttl = Math.min(Number(604800), 604800);
+const region = 'auto';
 
 const now = new Date();
 const datestamp = `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}`;

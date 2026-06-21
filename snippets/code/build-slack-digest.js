@@ -21,7 +21,7 @@ const processedIds = ($('Build summary input').first().json.enrichedItems || [])
 
 return [{
   json: {
-    channel: $env.SLACK_CHANNEL_ID || 'C0BCWHAHJRW',
+    channel: 'C0BCWHAHJRW',
     text,
     processedIds,
     signedUrl: sig.signedUrl

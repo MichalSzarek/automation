@@ -5,7 +5,7 @@
 const input = $input.first().json;
 const generatedAt = input.generatedAt || new Date().toISOString();
 const ts = Math.floor(Date.parse(generatedAt) / 1000);
-const bucket = $env.STORAGE_BUCKET || 'dcs-ai-news-briefs';
+const bucket = 'dcs-ai-news-briefs';
 const objectName = `brief_${ts}.wav`;
 const script = String(input.script || '').trim();
 
@@ -24,7 +24,7 @@ return [{
       input: { text: script },
       voice: {
         languageCode: 'pl-PL',
-        name: $env.TTS_VOICE || 'pl-PL-Wavenet-B'
+        name: 'pl-PL-Wavenet-B'
       },
       audioConfig: { audioEncoding: 'LINEAR16' },
       outputGcsUri: `gs://${bucket}/${objectName}`

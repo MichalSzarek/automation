@@ -1,21 +1,12 @@
 // Emit one item per source URL (YouTube channel RSS + HackerNews Algolia query).
 // Network is performed by the downstream "Fetch source" HTTP Request node so this
 // stays inside the n8n Code-node sandbox (no $helpers).
-
-function parseJsonEnv(name, fallback) {
-  const raw = $env[name];
-  if (!raw) return fallback;
-  try {
-    return JSON.parse(raw);
-  } catch (error) {
-    throw new Error(`${name} must be valid JSON: ${error.message}`);
-  }
-}
+// NOTE: env access is blocked on this n8n (N8N_BLOCK_ENV_ACCESS_IN_NODE), so config is literal.
 
 const lastRun = $('Init state').first().json.lastRun;
 
 // Pre-resolved UC channel ids (handles are resolved once at setup, never at runtime).
-const channelIds = parseJsonEnv('YT_CHANNEL_IDS', [
+const channelIds = [
   'UCXUPKJO5MZQN11PqgIvyuvQ', // @AndrejKarpathy
   'UCYO_jab_esuFRV4b17AJtAw', // @3blue1brown
   'UCMLtBahI5DMrt0NPvDSoIRQ', // @MachineLearningStreetTalk
@@ -27,23 +18,23 @@ const channelIds = parseJsonEnv('YT_CHANNEL_IDS', [
   'UCXZCJLdBC09xxGZ6gcdrc6A', // @OpenAI
   'UCP7jMXSY2xbc3KCAE0MHQ-A', // @GoogleDeepMind
   'UCrDwWp7EBBv4NwvScIpBDOA'  // @anthropic-ai
-]);
+];
 
-const topics = parseJsonEnv('HN_TOPICS', [
+const topics = [
   'MCP', 'Model Context Protocol', 'Claude Code', 'Cursor', 'AI Agent', 'Agentic',
   'Ollama', 'vLLM', 'llama.cpp', 'quantization', 'local LLM', 'fine-tune', 'LoRA',
   'DSPy', 'transformer', 'open weights', 'context window', 'RAG', 'vector database',
   'embedding', 'semantic search', 'GraphRAG', 'LLM eval', 'prompt injection',
   'LLM security', 'benchmark'
-]);
+];
 
-const minPoints = Number($env.HN_MIN_POINTS || 50);
+const minPoints = 50;
 
 const out = [];
 
 for (const cid of channelIds) {
   const id = String(cid || '').trim();
-  if (!id.startsWith('UC')) continue; // UC ids only — handles must be pre-resolved
+  if (!id.startsWith('UC')) continue;
   out.push({ json: { kind: 'yt', url: `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(id)}` } });
 }
 
@@ -54,6 +45,6 @@ for (const topic of topics) {
   out.push({ json: { kind: 'hn', url } });
 }
 
-if (!out.length) throw new Error('No source URLs built (check YT_CHANNEL_IDS / HN_TOPICS)');
+if (!out.length) throw new Error('No source URLs built');
 
 return out;

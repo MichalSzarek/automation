@@ -1,5 +1,5 @@
 const summaries = $input.all().map(item => item.json);
-const targetWords = Number($env.TARGET_WORDS || 1000);
+const targetWords = Number(1000);
 
 if (!summaries.length) throw new Error('No summaries available for script generation');
 
@@ -23,7 +23,8 @@ return [{
       systemInstruction: { parts: [{ text: system }] },
       generationConfig: {
         temperature: 0.35,
-        maxOutputTokens: Number($env.GEMINI_MAX_OUTPUT_TOKENS || 4096),
+        maxOutputTokens: 16384,
+        thinkingConfig: { thinkingBudget: 2048 },
         responseMimeType: 'application/json'
       }
     }

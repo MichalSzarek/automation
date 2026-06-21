@@ -1,6 +1,6 @@
 const items = $input.all().map(item => item.json);
-const topN = Number($env.TOP_N || 10);
-const interestProfile = $env.INTEREST_PROFILE || 'Software builder focused on practical AI systems: LLM architecture, agents, coding workflows, local inference, model optimization, RAG/data pipelines, evaluation, security, and production engineering. Prefer technically deep, implementation-oriented material over hype, launches without substance, or generic business commentary.';
+const topN = Number(10);
+const interestProfile = 'Software builder focused on practical AI systems: LLM architecture, agents, coding workflows, local inference, model optimization, RAG/data pipelines, evaluation, security, and production engineering. Prefer technically deep, implementation-oriented material over hype, launches without substance, or generic business commentary.';
 
 if (!items.length) throw new Error('No candidate items found');
 
@@ -23,7 +23,8 @@ return [{
       systemInstruction: { parts: [{ text: system }] },
       generationConfig: {
         temperature: 0.1,
-        maxOutputTokens: Number($env.GEMINI_MAX_OUTPUT_TOKENS || 4096),
+        maxOutputTokens: 8192,
+        thinkingConfig: { thinkingBudget: 0 },
         responseMimeType: 'application/json'
       }
     }
