@@ -1,0 +1,304 @@
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const snippet = name => readFileSync(join(root, 'snippets', 'code', name), 'utf8');
+
+function codeNode(id, name, file, position) {
+  return {
+    id,
+    name,
+    type: 'n8n-nodes-base.code',
+    typeVersion: 2,
+    position,
+    parameters: {
+      mode: 'runOnceForAllItems',
+      jsCode: snippet(file)
+    }
+  };
+}
+
+// GCP access token from the GCE metadata service (no stored key, no token broker).
+// Override GCP_TOKEN_URL for local dev against a broker.
+function tokenNode(id, name, position) {
+  return {
+    id,
+    name,
+    type: 'n8n-nodes-base.httpRequest',
+    typeVersion: 4.4,
+    position,
+    retryOnFail: true,
+    maxTries: 3,
+    waitBetweenTries: 2000,
+    parameters: {
+      method: 'GET',
+      url: '={{$env.GCP_TOKEN_URL || "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"}}',
+      sendHeaders: true,
+      headerParameters: {
+        parameters: [
+          { name: 'Metadata-Flavor', value: 'Google' }
+        ]
+      },
+      options: {
+        response: { response: { responseFormat: 'json' } }
+      }
+    }
+  };
+}
+
+function llmNode(id, name, position, modelEnv, requestNodeName, tokenNodeName) {
+  return {
+    id,
+    name,
+    type: 'n8n-nodes-base.httpRequest',
+    typeVersion: 4.4,
+    position,
+    retryOnFail: true,
+    maxTries: 3,
+    waitBetweenTries: 2000,
+    parameters: {
+      method: 'POST',
+      url: `={{(($env.GCP_LOCATION || 'global') === 'global' ? 'https://aiplatform.googleapis.com' : 'https://' + $env.GCP_LOCATION + '-aiplatform.googleapis.com') + '/v1/projects/' + ($env.AUDIO_BRIEF_GCP_PROJECT_ID || 'data-concept-studio') + '/locations/' + ($env.GCP_LOCATION || 'global') + '/publishers/google/models/' + ($env.${modelEnv} || '${modelEnv === 'LLM_MODEL_STRONG' ? 'gemini-2.5-pro' : 'gemini-2.5-flash'}') + ':generateContent'}}`,
+      sendHeaders: true,
+      headerParameters: {
+        parameters: [
+          { name: 'Authorization', value: `=Bearer {{$node["${tokenNodeName}"].json.access_token}}` },
+          { name: 'Content-Type', value: 'application/json' }
+        ]
+      },
+      sendBody: true,
+      specifyBody: 'json',
+      jsonBody: `={{JSON.stringify($node["${requestNodeName}"].json.requestBody)}}`,
+      options: {}
+    }
+  };
+}
+
+// Build a straight chain of `main` connections from an ordered list of node names.
+function connect(names) {
+  const connections = {};
+  for (let index = 0; index < names.length - 1; index += 1) {
+    connections[names[index]] = {
+      main: [[{ node: names[index + 1], type: 'main', index: 0 }]]
+    };
+  }
+  return connections;
+}
+
+const generatorNodes = [
+  {
+    id: 'schedule',
+    name: 'Weekly schedule',
+    type: 'n8n-nodes-base.scheduleTrigger',
+    typeVersion: 1.3,
+    position: [-960, 0],
+    parameters: {
+      rule: {
+        interval: [
+          {
+            field: 'cronExpression',
+            expression: '={{$env.AUDIO_BRIEF_CRON || "0 7 * * 1"}}'
+          }
+        ]
+      }
+    }
+  },
+  codeNode('init-state', 'Init state', 'init-state.js', [-780, 0]),
+
+  // --- Ingest: build URLs (pure JS) -> fetch (HTTP node) -> parse (pure JS) ---
+  codeNode('build-source-urls', 'Build source URLs', 'build-source-urls.js', [-600, 0]),
+  {
+    id: 'fetch-source', name: 'Fetch source', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.4,
+    position: [-420, 0], retryOnFail: true, maxTries: 3, waitBetweenTries: 2000, onError: 'continueRegularOutput',
+    parameters: {
+      method: 'GET', url: '={{$json.url}}',
+      options: {
+        response: { response: { responseFormat: 'text' } },
+        batching: { batch: { batchSize: 4, batchInterval: 500 } }
+      }
+    }
+  },
+  codeNode('parse-candidates', 'Parse candidates', 'parse-candidates.js', [-240, 0]),
+
+  codeNode('build-filter-input', 'Build filter input', 'build-filter-input.js', [-60, 0]),
+  tokenNode('gcp-token-filter', 'Get GCP token filter', [120, 0]),
+  llmNode('llm-filter', 'LLM filter cheap', [300, 0], 'LLM_MODEL_CHEAP', 'Build filter input', 'Get GCP token filter'),
+  codeNode('parse-select', 'Parse selected', 'parse-select.js', [480, 0]),
+
+  // --- Enrich: HN through HTTP fetch, YT placeholder, merge ---
+  {
+    id: 'route-source', name: 'Route source', type: 'n8n-nodes-base.if', typeVersion: 2.2, position: [660, 0],
+    parameters: {
+      conditions: {
+        options: { caseSensitive: true, version: 2, leftValue: '' },
+        combinator: 'and',
+        conditions: [{ id: 'is-hn', leftValue: '={{$json.source}}', rightValue: 'hn', operator: { type: 'string', operation: 'equals' } }]
+      }
+    }
+  },
+  {
+    id: 'fetch-article', name: 'Fetch article', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.4,
+    position: [840, -140], retryOnFail: true, maxTries: 2, waitBetweenTries: 2000, onError: 'continueRegularOutput',
+    parameters: {
+      method: 'GET', url: '={{$json.url}}',
+      sendHeaders: true,
+      headerParameters: { parameters: [{ name: 'User-Agent', value: 'audio-brief-bot/0.1' }] },
+      options: { response: { response: { responseFormat: 'text' } }, timeout: 20000 }
+    }
+  },
+  codeNode('enrich-hn', 'Enrich HN', 'enrich-hn.js', [1020, -140]),
+  codeNode('enrich-yt', 'Enrich YT', 'enrich-yt.js', [840, 140]),
+  {
+    id: 'merge-enriched', name: 'Merge enriched', type: 'n8n-nodes-base.merge', typeVersion: 3.2, position: [1200, 0],
+    parameters: { mode: 'append', numberInputs: 2 }
+  },
+
+  codeNode('build-summary-input', 'Build summary input', 'build-summary-input.js', [1380, 0]),
+  tokenNode('gcp-token-summary', 'Get GCP token summary', [1560, 0]),
+  llmNode('llm-summary', 'LLM summarize cheap', [1740, 0], 'LLM_MODEL_CHEAP', 'Build summary input', 'Get GCP token summary'),
+  codeNode('parse-summaries', 'Parse summaries', 'parse-summaries.js', [1920, 0]),
+
+  codeNode('build-script-input', 'Build script input', 'build-script-input.js', [2100, 0]),
+  tokenNode('gcp-token-script', 'Get GCP token script', [2280, 0]),
+  llmNode('llm-script', 'LLM script strong', [2460, 0], 'LLM_MODEL_STRONG', 'Build script input', 'Get GCP token script'),
+  codeNode('parse-script', 'Parse script', 'parse-script.js', [2640, 0]),
+
+  // --- TTS: Long Audio -> GCS, polled LRO ---
+  codeNode('build-longaudio-request', 'Build LongAudio request', 'build-longaudio-request.js', [2820, 0]),
+  tokenNode('gcp-token-tts', 'Get GCP token tts', [3000, 0]),
+  {
+    id: 'tts-longaudio', name: 'TTS synthesize long', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.4,
+    position: [3180, 0], retryOnFail: true, maxTries: 3, waitBetweenTries: 2000,
+    parameters: {
+      method: 'POST',
+      url: "={{'https://texttospeech.googleapis.com/v1/projects/' + ($env.AUDIO_BRIEF_GCP_PROJECT_ID || 'data-concept-studio') + '/locations/' + ($env.TTS_LOCATION || 'us') + ':synthesizeLongAudio'}}",
+      sendHeaders: true,
+      headerParameters: { parameters: [
+        { name: 'Authorization', value: '=Bearer {{$node["Get GCP token tts"].json.access_token}}' },
+        { name: 'Content-Type', value: 'application/json' } ] },
+      sendBody: true, specifyBody: 'json',
+      jsonBody: '={{JSON.stringify($node["Build LongAudio request"].json.requestBody)}}',
+      options: {}
+    }
+  },
+  {
+    id: 'wait-tts', name: 'Wait for TTS', type: 'n8n-nodes-base.wait', typeVersion: 1.1,
+    position: [3360, 0], webhookId: 'audio-brief-tts-wait', parameters: { amount: 15, unit: 'seconds' }
+  },
+  tokenNode('gcp-token-op', 'Get GCP token op', [3540, 0]),
+  {
+    id: 'op-get', name: 'Operation get', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.4,
+    position: [3720, 0], retryOnFail: true, maxTries: 3, waitBetweenTries: 2000,
+    parameters: {
+      method: 'GET',
+      url: '={{"https://texttospeech.googleapis.com/v1/" + ($node["TTS synthesize long"].json.name || $json.operationName)}}',
+      sendHeaders: true,
+      headerParameters: { parameters: [ { name: 'Authorization', value: '=Bearer {{$node["Get GCP token op"].json.access_token}}' } ] },
+      options: { response: { response: { responseFormat: 'json' } } }
+    }
+  },
+  codeNode('poll-longaudio', 'Poll long audio', 'poll-longaudio.js', [3900, 0]),
+  {
+    id: 'tts-done', name: 'TTS done?', type: 'n8n-nodes-base.if', typeVersion: 2.2, position: [4080, 0],
+    parameters: {
+      conditions: {
+        options: { caseSensitive: true, version: 2, leftValue: '' },
+        combinator: 'and',
+        conditions: [{ id: 'done', leftValue: '={{$json.done}}', rightValue: true, operator: { type: 'boolean', operation: 'true', singleValue: true } }]
+      }
+    }
+  },
+
+  // --- Signed URL (V4 via IAM signBlob) -> Slack -> commit ---
+  codeNode('build-signed-url', 'Build signed url', 'build-signed-url.js', [4260, -160]),
+  tokenNode('gcp-token-sign', 'Get GCP token sign', [4440, -160]),
+  {
+    id: 'sign-blob', name: 'Sign blob', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.4,
+    position: [4620, -160], retryOnFail: true, maxTries: 3, waitBetweenTries: 2000,
+    parameters: {
+      method: 'POST',
+      url: "={{'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/' + encodeURIComponent($env.AUDIO_BRIEF_SIGNER_SA || 'maths-vm-sa@data-concept-studio.iam.gserviceaccount.com') + ':signBlob'}}",
+      sendHeaders: true,
+      headerParameters: { parameters: [
+        { name: 'Authorization', value: '=Bearer {{$node["Get GCP token sign"].json.access_token}}' },
+        { name: 'Content-Type', value: 'application/json' } ] },
+      sendBody: true, specifyBody: 'json',
+      jsonBody: '={{JSON.stringify({ payload: $node["Build signed url"].json.payloadB64 })}}',
+      options: { response: { response: { responseFormat: 'json' } } }
+    }
+  },
+  codeNode('assemble-signed-url', 'Assemble signed url', 'assemble-signed-url.js', [4800, -160]),
+  codeNode('build-slack-digest', 'Build Slack digest', 'build-slack-digest.js', [4980, -160]),
+  {
+    id: 'slack-post', name: 'Post to ai-news', type: 'n8n-nodes-base.slack', typeVersion: 2.4,
+    position: [5160, -160],
+    credentials: { slackApi: { id: '={{$env.SLACK_CREDENTIAL_ID || "wzM8zIUgZuaGOwgg"}}', name: 'MATHS Slack Bot' } },
+    parameters: {
+      resource: 'message', operation: 'post',
+      select: 'channel',
+      channelId: { __rl: true, mode: 'id', value: '={{$json.channel}}' },
+      text: '={{$json.text}}',
+      otherOptions: { unfurl_links: false, unfurl_media: false }
+    }
+  },
+  codeNode('commit-state', 'Commit state', 'commit-state.js', [5340, -160])
+];
+
+const preChain = [
+  'Weekly schedule', 'Init state', 'Build source URLs', 'Fetch source', 'Parse candidates',
+  'Build filter input', 'Get GCP token filter', 'LLM filter cheap', 'Parse selected'
+];
+const summaryToScript = [
+  'Build summary input', 'Get GCP token summary', 'LLM summarize cheap', 'Parse summaries',
+  'Build script input', 'Get GCP token script', 'LLM script strong', 'Parse script'
+];
+const ttsChain = [
+  'Build LongAudio request', 'Get GCP token tts', 'TTS synthesize long', 'Wait for TTS',
+  'Get GCP token op', 'Operation get', 'Poll long audio', 'TTS done?'
+];
+const signToCommit = [
+  'Build signed url', 'Get GCP token sign', 'Sign blob', 'Assemble signed url',
+  'Build Slack digest', 'Post to ai-news', 'Commit state'
+];
+
+const connections = {
+  ...connect(preChain),
+  'Parse selected': { main: [[{ node: 'Route source', type: 'main', index: 0 }]] },
+  'Route source': {
+    main: [
+      [{ node: 'Fetch article', type: 'main', index: 0 }], // true  (hn)
+      [{ node: 'Enrich YT', type: 'main', index: 0 }]       // false (yt)
+    ]
+  },
+  'Fetch article': { main: [[{ node: 'Enrich HN', type: 'main', index: 0 }]] },
+  'Enrich HN': { main: [[{ node: 'Merge enriched', type: 'main', index: 0 }]] },
+  'Enrich YT': { main: [[{ node: 'Merge enriched', type: 'main', index: 1 }]] },
+  'Merge enriched': { main: [[{ node: 'Build summary input', type: 'main', index: 0 }]] },
+  ...connect(summaryToScript),
+  'Parse script': { main: [[{ node: 'Build LongAudio request', type: 'main', index: 0 }]] },
+  ...connect(ttsChain),
+  'TTS done?': {
+    main: [
+      [{ node: 'Build signed url', type: 'main', index: 0 }], // true  -> sign
+      [{ node: 'Wait for TTS', type: 'main', index: 0 }]      // false -> poll again
+    ]
+  },
+  ...connect(signToCommit)
+};
+
+const generatorWorkflow = {
+  name: 'AI News Brief - GCS + Slack',
+  nodes: generatorNodes,
+  connections,
+  settings: {
+    executionOrder: 'v1',
+    timezone: 'Europe/Warsaw',
+    saveDataErrorExecution: 'all',
+    saveDataSuccessExecution: 'none'
+  }
+};
+
+mkdirSync(join(root, 'workflows'), { recursive: true });
+writeFileSync(join(root, 'workflows', 'personal-audio-brief.json'), `${JSON.stringify(generatorWorkflow, null, 2)}\n`);
+console.log('built workflows/personal-audio-brief.json');

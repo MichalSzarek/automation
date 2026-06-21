@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+node_modules/
+tmp/
+dist/
+*.mp3
+*.wav
+*.m4a
+.DS_Store

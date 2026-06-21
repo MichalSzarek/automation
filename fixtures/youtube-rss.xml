@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015">
+  <entry>
+    <id>yt:video:abc123</id>
+    <yt:videoId>abc123</yt:videoId>
+    <title>Interesting AI systems video</title>
+    <link href="https://www.youtube.com/watch?v=abc123"/>
+    <published>2026-06-12T07:00:00+00:00</published>
+    <author><name>Example Channel</name></author>
+    <media:description>Short description from RSS.</media:description>
+  </entry>
+</feed>
