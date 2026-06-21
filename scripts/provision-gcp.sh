@@ -4,12 +4,20 @@
 #   gcloud config set account dataconceptstudio@gmail.com
 #   gcloud config set project data-concept-studio
 #   bash scripts/provision-gcp.sh
+#
+# Notes (verified 2026-06-21):
+#  - Cloud TTS Long Audio has NO service agent; the *caller* (the VM SA via its metadata
+#    token) writes the WAV, so only objectAdmin on the SA is needed (it already has it
+#    project-wide). There is no roles/cloudtts.user role — the enabled API + cloud-platform
+#    scope are sufficient.
 set -euo pipefail
 
-PROJECT="${AUDIO_BRIEF_GCP_PROJECT_ID:-data-concept-studio}"
-BUCKET="${STORAGE_BUCKET:-dcs-ai-news-briefs}"
-BUCKET_LOCATION="${BUCKET_LOCATION:-europe-west1}"
-SA="${AUDIO_BRIEF_SIGNER_SA:-maths-vm-sa@data-concept-studio.iam.gserviceaccount.com}"
+PROJECT="data-concept-studio"
+BUCKET="dcs-ai-news-briefs"
+BUCKET_LOCATION="europe-west1"
+SA="maths-vm-sa@data-concept-studio.iam.gserviceaccount.com"
+TTS_LOCATION="us"
+TTS_VOICE="pl-PL-Wavenet-B"
 
 echo "Project: $PROJECT | Bucket: gs://$BUCKET ($BUCKET_LOCATION) | SA: $SA"
 echo "Identity: $(gcloud config get-value account 2>/dev/null)"
@@ -18,39 +26,27 @@ echo "== 1. enable APIs =="
 gcloud services enable texttospeech.googleapis.com aiplatform.googleapis.com iamcredentials.googleapis.com \
   --project="$PROJECT"
 
-echo "== 2. create Cloud TTS service identity (agent) =="
-gcloud beta services identity create --service=texttospeech.googleapis.com --project="$PROJECT" || true
-PROJNUM="$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')"
-TTS_AGENT="service-${PROJNUM}@gcp-sa-texttospeech.iam.gserviceaccount.com"
-
-echo "== 3. create private bucket (skip if exists) =="
+echo "== 2. create private bucket (skip if exists) =="
 gcloud storage buckets create "gs://${BUCKET}" --project="$PROJECT" --location="$BUCKET_LOCATION" \
   --uniform-bucket-level-access --public-access-prevention || true
 
-echo "== 4. grant bucket access =="
-# SA already has project-level storage.objectAdmin, but make the intent explicit on the bucket:
+echo "== 3. grant the VM SA object admin on the bucket (it also has it project-wide) =="
 gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" \
   --member="serviceAccount:${SA}" --role="roles/storage.objectAdmin"
-# Cloud TTS service agent must be able to write the synthesized WAV:
-gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" \
-  --member="serviceAccount:${TTS_AGENT}" --role="roles/storage.objectAdmin"
 
-echo "== 5. grant SA the roles it is missing =="
-# signBlob (V4 signed URLs) — token-creator on itself:
+echo "== 4. grant the SA token-creator on itself (for V4 signed URLs via signBlob) =="
 gcloud iam service-accounts add-iam-policy-binding "$SA" \
   --member="serviceAccount:${SA}" --role="roles/iam.serviceAccountTokenCreator"
-# Cloud TTS caller (aiplatform.user is already present):
-gcloud projects add-iam-policy-binding "$PROJECT" \
-  --member="serviceAccount:${SA}" --role="roles/cloudtts.user" || \
-  echo "  (roles/cloudtts.user not grantable here — TTS may already be callable via the enabled API)"
 
-echo "== 6. verify Long Audio endpoint (writes a probe WAV, then deletes it) =="
+echo "== 5. verify Long Audio end to end (writes then deletes a probe WAV) =="
 TOKEN="$(gcloud auth print-access-token)"
 HTTP=$(curl -s -o /tmp/la_probe.json -w '%{http_code}' -X POST \
-  "https://texttospeech.googleapis.com/v1/projects/${PROJECT}/locations/${TTS_LOCATION:-us}:synthesizeLongAudio" \
+  "https://texttospeech.googleapis.com/v1/projects/${PROJECT}/locations/${TTS_LOCATION}:synthesizeLongAudio" \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d "{\"input\":{\"text\":\"test\"},\"voice\":{\"languageCode\":\"pl-PL\",\"name\":\"${TTS_VOICE:-pl-PL-Wavenet-B}\"},\"audioConfig\":{\"audioEncoding\":\"LINEAR16\"},\"outputGcsUri\":\"gs://${BUCKET}/_probe.wav\"}")
+  -H "x-goog-user-project: ${PROJECT}" \
+  -d "{\"input\":{\"text\":\"test\"},\"voice\":{\"languageCode\":\"pl-PL\",\"name\":\"${TTS_VOICE}\"},\"audioConfig\":{\"audioEncoding\":\"LINEAR16\"},\"outputGcsUri\":\"gs://${BUCKET}/_probe.wav\"}")
 echo "  synthesizeLongAudio HTTP $HTTP"; cat /tmp/la_probe.json; echo
-gcloud storage rm "gs://${BUCKET}/_probe.wav" 2>/dev/null || true
+sleep 5 && gcloud storage rm "gs://${BUCKET}/_probe.wav" 2>/dev/null || true
 
-echo "Done. If step 6 returned an operations/... name (HTTP 200), provisioning is complete."
+echo "Done. HTTP 200 with an operations/... name above means provisioning is complete."
+echo "Remember: the 'MATHS Slack Bot' must be a member of #ai-news (C0BCWHAHJRW)."
