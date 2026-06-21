@@ -7,7 +7,7 @@ const ts = Math.floor(Date.parse(generatedAt) / 1000);
 const bucket = 'dcs-ai-news-briefs';
 const objectName = `fin_brief_${ts}.mp3`;
 
-const MAX_CHARS = 2600; // safety cap for the ElevenLabs free-tier quota
+const MAX_CHARS = 9500; // safety cap (~10 min); Starter plan = ~30k chars/mo
 let script = String(input.script || '').trim();
 if (!script) throw new Error('No script text for TTS');
 if (script.length > MAX_CHARS) {
