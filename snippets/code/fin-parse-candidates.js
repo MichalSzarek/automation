@@ -18,6 +18,12 @@ function stripHtml(value) {
   return String(value || '')
     .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 }
+// short, stable id from a long guid/URL so the LLM round-trips it reliably (for the id->url join)
+function shortId(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return 'n' + h.toString(36);
+}
 
 const lastRun = $('Init state').first().json.lastRun;
 const s = $getWorkflowStaticData('global');
@@ -49,15 +55,17 @@ for (const entry of $input.all()) {
     for (const node of (text.match(/<item[\s>][\s\S]*?<\/item>/gi) || [])) {
       const link = textBetween(node, 'link') || attr(node, 'guid', 'isPermaLink') && textBetween(node, 'guid');
       const guid = textBetween(node, 'guid') || link;
-      const id = String(guid || link || '').trim();
-      if (!id || seenIds.has(id)) continue;
+      const raw = String(guid || link || '').trim();
+      if (!raw) continue;
+      const id = shortId(raw); // short stable id (long guids/URLs get mangled by the LLM)
+      if (seenIds.has(id)) continue;
       const pub = textBetween(node, 'pubDate');
       const epoch = Math.floor(Date.parse(pub) / 1000);
       if (epoch && epoch <= lastRun) continue; // skip clearly-old; undated items pass (seenIds dedups)
       unique.set(`news:${id}`, {
         source: 'news', id,
         title: stripHtml(textBetween(node, 'title')),
-        url: link || id,
+        url: link || raw,
         published: pub,
         snippet: stripHtml(textBetween(node, 'description')).slice(0, 800)
       });
