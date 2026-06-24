@@ -23,7 +23,7 @@ const lines = summaries.slice(0, 12).map(s => {
 });
 
 const body = lines.length ? lines.join('\n') : '_Brak nowych pozycji w tym tygodniu._';
-const text = `🧠 *AI Brief — ${day}*\n${body}\n\n🎧 <${sig.signedUrl}|Pobierz audio (WAV)> · link ważny 7 dni`;
+const text = `🧠 *AI Brief — ${day}*\n${body}\n\n🎧 <${sig.signedUrl}|Pobierz audio> · link ważny 7 dni`;
 
 const processedIds = enriched.map(i => i.id);
 

@@ -6,7 +6,7 @@ if (op.error) {
   throw new Error(`Long Audio failed: ${JSON.stringify(op.error)}`);
 }
 
-const carry = $('Build LongAudio request').first().json;
+const carry = $('Build TTS request').first().json;
 
 if (op.done === true) {
   return [{ json: { ...carry, done: true } }];
