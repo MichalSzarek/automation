@@ -1,13 +1,13 @@
 {
-  "name": "AI News Brief - GCS + Slack",
+  "name": "Finance Brief - GCS + Slack",
   "nodes": [
     {
-      "id": "schedule",
+      "id": "fin-schedule",
       "name": "Weekly schedule",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.3,
       "position": [
-        -960,
+        -1040,
         0
       ],
       "parameters": {
@@ -15,19 +15,19 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "0 7 * * 1"
+              "expression": "0 8 * * 1"
             }
           ]
         }
       }
     },
     {
-      "id": "init-state",
+      "id": "fin-init-state",
       "name": "Init state",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -780,
+        -860,
         0
       ],
       "parameters": {
@@ -36,26 +36,26 @@
       }
     },
     {
-      "id": "build-source-urls",
+      "id": "fin-build-source-urls",
       "name": "Build source URLs",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -600,
+        -680,
         0
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Emit one item per source URL (YouTube channel RSS + HackerNews Algolia query).\n// Network is performed by the downstream \"Fetch source\" HTTP Request node so this\n// stays inside the n8n Code-node sandbox (no $helpers).\n// NOTE: env access is blocked on this n8n (N8N_BLOCK_ENV_ACCESS_IN_NODE), so config is literal.\n\nconst lastRun = $('Init state').first().json.lastRun;\n\n// Pre-resolved UC channel ids (handles are resolved once at setup, never at runtime).\nconst channelIds = [\n  'UCXUPKJO5MZQN11PqgIvyuvQ', // @AndrejKarpathy\n  'UCYO_jab_esuFRV4b17AJtAw', // @3blue1brown\n  'UCMLtBahI5DMrt0NPvDSoIRQ', // @MachineLearningStreetTalk\n  'UCNJ1Ymd5yFuUPtn21xtRbbw', // @aiexplained-official\n  'UCbfYPyITQ-7l4upoX8nvctg', // @TwoMinutePapers\n  'UCMwVTLZIRRUyyVrkjDpn4pA', // @ColeMedin\n  'UC_x36zCEGilGpB1m-V4gmjg', // @IndyDevDan\n  'UCn8ujwUInbJkBhffxqAPBVQ', // @daveebbelaar\n  'UCXZCJLdBC09xxGZ6gcdrc6A', // @OpenAI\n  'UCP7jMXSY2xbc3KCAE0MHQ-A', // @GoogleDeepMind\n  'UCrDwWp7EBBv4NwvScIpBDOA'  // @anthropic-ai\n];\n\nconst topics = [\n  'MCP', 'Model Context Protocol', 'Claude Code', 'Cursor', 'AI Agent', 'Agentic',\n  'Ollama', 'vLLM', 'llama.cpp', 'quantization', 'local LLM', 'fine-tune', 'LoRA',\n  'DSPy', 'transformer', 'open weights', 'context window', 'RAG', 'vector database',\n  'embedding', 'semantic search', 'GraphRAG', 'LLM eval', 'prompt injection',\n  'LLM security', 'benchmark'\n];\n\nconst minPoints = 50;\n\nconst out = [];\n\nfor (const cid of channelIds) {\n  const id = String(cid || '').trim();\n  if (!id.startsWith('UC')) continue;\n  out.push({ json: { kind: 'yt', url: `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(id)}` } });\n}\n\nfor (const topic of topics) {\n  const url = 'https://hn.algolia.com/api/v1/search_by_date'\n    + `?tags=story&query=${encodeURIComponent(topic)}`\n    + `&numericFilters=points>${minPoints},created_at_i>${lastRun}`;\n  out.push({ json: { kind: 'hn', url } });\n}\n\nif (!out.length) throw new Error('No source URLs built');\n\nreturn out;\n"
+        "jsCode": "// Finance brief sources: 3 Polish finance YouTube channels + finance-news RSS\n// (Bankier.pl Polish + MarketWatch global). Fetch is done by the HTTP node downstream.\n// NOTE: env access is blocked on this n8n (N8N_BLOCK_ENV_ACCESS_IN_NODE) -> literals.\n\nconst lastRun = $('Init state').first().json.lastRun;\n\nconst channelIds = [\n  'UCgw_3Epv7swquSZyMDjYHTg', // @DNARynkow\n  'UCtTpDSRTegHewCxP9GTUaXQ', // @FxMag\n  'UCG4T6bLDq2TdAdRAp2GDOCw'  // @zawodinwestor\n];\n\nconst newsFeeds = [\n  'https://www.bankier.pl/rss/wiadomosci.xml',                       // Polish finance\n  'https://feeds.content.dowjones.io/public/rss/mw_topstories'       // MarketWatch (global)\n];\n\nconst out = [];\nfor (const cid of channelIds) {\n  const id = String(cid || '').trim();\n  if (!id.startsWith('UC')) continue;\n  out.push({ json: { kind: 'yt', url: `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(id)}` } });\n}\nfor (const url of newsFeeds) {\n  out.push({ json: { kind: 'news', url } });\n}\n\nif (!out.length) throw new Error('No finance source URLs built');\nreturn out;\n"
       }
     },
     {
-      "id": "fetch-source",
+      "id": "fin-fetch-source",
       "name": "Fetch source",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        -420,
+        -500,
         0
       ],
       "retryOnFail": true,
@@ -65,6 +65,15 @@
       "parameters": {
         "method": "GET",
         "url": "={{$json.url}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "finance-brief-bot/0.1"
+            }
+          ]
+        },
         "options": {
           "response": {
             "response": {
@@ -73,7 +82,7 @@
           },
           "batching": {
             "batch": {
-              "batchSize": 4,
+              "batchSize": 3,
               "batchInterval": 500
             }
           }
@@ -81,40 +90,40 @@
       }
     },
     {
-      "id": "parse-candidates",
+      "id": "fin-parse-candidates",
       "name": "Parse candidates",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -240,
+        -320,
         0
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Parse the responses produced by \"Fetch source\" (one item per source URL).\n// YouTube feeds come back as Atom XML, HackerNews as Algolia JSON. Detect by content,\n// dedupe, and filter against lastRun + seenIds. No network here (sandbox-safe).\n\nfunction decodeXml(value) {\n  return String(value || '')\n    .replace(/&amp;/g, '&')\n    .replace(/&lt;/g, '<')\n    .replace(/&gt;/g, '>')\n    .replace(/&quot;/g, '\"')\n    .replace(/&#39;/g, \"'\");\n}\n\nfunction textBetween(source, tag) {\n  const match = source.match(new RegExp(`<${tag}[^>]*>([\\\\s\\\\S]*?)<\\\\/${tag}>`, 'i'));\n  if (!match) return '';\n  return decodeXml(match[1].replace(/<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>/g, '$1').trim());\n}\n\nfunction stripHtml(value) {\n  return String(value || '')\n    .replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')\n    .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction hnItemUrl(objectID) {\n  return `https://news.ycombinator.com/item?id=${encodeURIComponent(objectID)}`;\n}\n\nconst lastRun = $('Init state').first().json.lastRun;\nconst staticData = $getWorkflowStaticData('global');\nconst seenIds = new Set(staticData.seenIds || []);\nconst unique = new Map();\n\nfor (const entry of $input.all()) {\n  const body = entry.json.data;\n  const text = typeof body === 'string' ? body : JSON.stringify(body || '');\n  if (!text) continue;\n  const isXml = text.trimStart().startsWith('<');\n\n  if (isXml) {\n    for (const node of (text.match(/<entry>[\\s\\S]*?<\\/entry>/gi) || [])) {\n      const id = textBetween(node, 'yt:videoId') || textBetween(node, 'id').replace(/^yt:video:/, '');\n      const published = textBetween(node, 'published');\n      const publishedEpoch = Math.floor(Date.parse(published) / 1000);\n      if (!id || !publishedEpoch || publishedEpoch <= lastRun || seenIds.has(id)) continue;\n      unique.set(`yt:${id}`, {\n        source: 'yt',\n        id,\n        title: textBetween(node, 'title'),\n        url: textBetween(node, 'link') || `https://www.youtube.com/watch?v=${id}`,\n        published,\n        channel: textBetween(node, 'name'),\n        snippet: stripHtml(textBetween(node, 'media:description'))\n      });\n    }\n  } else {\n    let json;\n    try {\n      json = typeof body === 'string' ? JSON.parse(body) : body;\n    } catch (error) {\n      json = { hits: [] };\n    }\n    for (const hit of json.hits || []) {\n      const id = String(hit.objectID || '');\n      if (!id || seenIds.has(id)) continue;\n      unique.set(`hn:${id}`, {\n        source: 'hn',\n        id,\n        title: hit.title || hit.story_title || '',\n        url: hit.url || hnItemUrl(id),\n        published: hit.created_at,\n        points: hit.points || 0,\n        objectID: id,\n        snippet: hit.story_text || ''\n      });\n    }\n  }\n}\n\nreturn [...unique.values()].map(json => ({ json }));\n"
+        "jsCode": "// Parse \"Fetch source\" responses: YouTube Atom feeds (<entry>) and RSS news feeds (<item>).\n// Dedupe + filter by lastRun + seenIds. No network here (sandbox-safe).\n\nfunction decodeXml(value) {\n  return String(value || '')\n    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')\n    .replace(/&quot;/g, '\"').replace(/&#39;/g, \"'\").replace(/&#x[0-9a-f]+;/gi, ' ');\n}\nfunction textBetween(source, tag) {\n  const m = source.match(new RegExp(`<${tag}[^>]*>([\\\\s\\\\S]*?)<\\\\/${tag}>`, 'i'));\n  return m ? decodeXml(m[1].replace(/<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>/g, '$1').trim()) : '';\n}\nfunction attr(source, tag, name) {\n  const m = source.match(new RegExp(`<${tag}[^>]*\\\\b${name}=\"([^\"]*)\"`, 'i'));\n  return m ? decodeXml(m[1]) : '';\n}\nfunction stripHtml(value) {\n  return String(value || '')\n    .replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim();\n}\n// short, stable id from a long guid/URL so the LLM round-trips it reliably (for the id->url join)\nfunction shortId(s) {\n  let h = 0;\n  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;\n  return 'n' + h.toString(36);\n}\n\nconst lastRun = $('Init state').first().json.lastRun;\nconst s = $getWorkflowStaticData('global');\nconst seenIds = new Set(s.seenIds || []);\nconst unique = new Map();\n\nfor (const entry of $input.all()) {\n  const body = entry.json.data;\n  const text = typeof body === 'string' ? body : JSON.stringify(body || '');\n  if (!text) continue;\n\n  if (/<entry[\\s>]/i.test(text)) {\n    // YouTube Atom\n    for (const node of (text.match(/<entry>[\\s\\S]*?<\\/entry>/gi) || [])) {\n      const id = textBetween(node, 'yt:videoId') || textBetween(node, 'id').replace(/^yt:video:/, '');\n      const published = textBetween(node, 'published');\n      const epoch = Math.floor(Date.parse(published) / 1000);\n      if (!id || !epoch || epoch <= lastRun || seenIds.has(id)) continue;\n      unique.set(`yt:${id}`, {\n        source: 'yt', id,\n        title: textBetween(node, 'title'),\n        url: `https://www.youtube.com/watch?v=${id}`,\n        published, channel: textBetween(node, 'name'),\n        snippet: stripHtml(textBetween(node, 'media:description')).slice(0, 800)\n      });\n    }\n  } else if (/<item[\\s>]/i.test(text)) {\n    // RSS news\n    for (const node of (text.match(/<item[\\s>][\\s\\S]*?<\\/item>/gi) || [])) {\n      const link = textBetween(node, 'link') || attr(node, 'guid', 'isPermaLink') && textBetween(node, 'guid');\n      const guid = textBetween(node, 'guid') || link;\n      const raw = String(guid || link || '').trim();\n      if (!raw) continue;\n      const id = shortId(raw); // short stable id (long guids/URLs get mangled by the LLM)\n      if (seenIds.has(id)) continue;\n      const pub = textBetween(node, 'pubDate');\n      const epoch = Math.floor(Date.parse(pub) / 1000);\n      if (epoch && epoch <= lastRun) continue; // skip clearly-old; undated items pass (seenIds dedups)\n      unique.set(`news:${id}`, {\n        source: 'news', id,\n        title: stripHtml(textBetween(node, 'title')),\n        url: link || raw,\n        published: pub,\n        snippet: stripHtml(textBetween(node, 'description')).slice(0, 800)\n      });\n    }\n  }\n}\n\nreturn [...unique.values()].map(json => ({ json }));\n"
       }
     },
     {
-      "id": "build-filter-input",
+      "id": "fin-build-filter-input",
       "name": "Build filter input",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -60,
+        -140,
         0
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const items = $input.all().map(item => item.json);\nconst topN = Number(10);\nconst interestProfile = 'Software builder focused on practical AI systems: LLM architecture, agents, coding workflows, local inference, model optimization, RAG/data pipelines, evaluation, security, and production engineering. Prefer technically deep, implementation-oriented material over hype, launches without substance, or generic business commentary.';\n\nif (!items.length) throw new Error('No candidate items found');\n\nconst system = `Jestes filtrem tresci dla codziennego briefu. Profil odbiorcy:\n${interestProfile}\n\nOtrzymasz liste pozycji: id, source, title, snippet.\nZwroc wylacznie JSON:\n{\"selected\":[{\"id\":\"...\",\"reason\":\"<max 12 slow>\"}]}\nZasady: maksymalnie ${topN} pozycji; odrzuc materialy promocyjne, clickbait i duplikaty tematyczne; preferuj zgodnosc z profilem. Bez komentarza poza JSON.`;\n\nreturn [{\n  json: {\n    candidateItems: items,\n    requestBody: {\n      contents: [{\n        role: 'user',\n        parts: [{ text: JSON.stringify(items.map(({ id, source, title, snippet }) => ({ id, source, title, snippet }))) }]\n      }],\n      systemInstruction: { parts: [{ text: system }] },\n      generationConfig: {\n        temperature: 0.1,\n        maxOutputTokens: 8192,\n        thinkingConfig: { thinkingBudget: 0 },\n        responseMimeType: 'application/json'\n      }\n    }\n  }\n}];\n"
+        "jsCode": "// Finance filter: rank candidate items against a finance/markets interest profile.\n// NOTE: env access is blocked on this n8n -> literals.\n\nconst items = $input.all().map(item => item.json);\nconst topN = 8;\nconst interestProfile = 'Inwestor/trader sledzacy rynki finansowe: akcje (GPW i rynki swiatowe), indeksy, makroekonomia, stopy procentowe i banki centralne (NBP, Fed, EBC), waluty (PLN, EUR, USD), surowce (ropa, zloto, gaz), obligacje, wyniki spolek, geopolityka wplywajaca na rynki. Preferuj konkret rynkowy i analize ponad clickbait, reklamy i tresci poradnikowe ogolne.';\n\nif (!items.length) throw new Error('No candidate items found');\n\nconst system = `Jestes filtrem tresci dla cotygodniowego briefu finansowego. Profil odbiorcy:\n${interestProfile}\n\nOtrzymasz liste pozycji: id, source, title, snippet.\nZwroc wylacznie JSON:\n{\"selected\":[{\"id\":\"...\",\"reason\":\"<max 12 slow>\"}]}\nZasady: maksymalnie ${topN} pozycji; odrzuc reklamy, clickbait i duplikaty tematyczne; preferuj zgodnosc z profilem i swiezosc rynkowa. Bez komentarza poza JSON.`;\n\nreturn [{\n  json: {\n    candidateItems: items,\n    requestBody: {\n      contents: [{\n        role: 'user',\n        parts: [{ text: JSON.stringify(items.map(({ id, source, title, snippet }) => ({ id, source, title, snippet }))) }]\n      }],\n      systemInstruction: { parts: [{ text: system }] },\n      generationConfig: {\n        temperature: 0.1,\n        maxOutputTokens: 8192,\n        thinkingConfig: { thinkingBudget: 0 },\n        responseMimeType: 'application/json'\n      }\n    }\n  }\n}];\n"
       }
     },
     {
-      "id": "gcp-token-filter",
+      "id": "fin-token-filter",
       "name": "Get GCP token filter",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        120,
+        40,
         0
       ],
       "retryOnFail": true,
@@ -142,12 +151,12 @@
       }
     },
     {
-      "id": "llm-filter",
+      "id": "fin-llm-filter",
       "name": "LLM filter cheap",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        300,
+        220,
         0
       ],
       "retryOnFail": true,
@@ -176,12 +185,12 @@
       }
     },
     {
-      "id": "parse-select",
+      "id": "fin-parse-select",
       "name": "Parse selected",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        480,
+        400,
         0
       ],
       "parameters": {
@@ -190,121 +199,26 @@
       }
     },
     {
-      "id": "route-source",
-      "name": "Route source",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.3,
-      "position": [
-        660,
-        0
-      ],
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "typeValidation": "strict",
-            "leftValue": "",
-            "version": 2
-          },
-          "combinator": "and",
-          "conditions": [
-            {
-              "id": "is-hn",
-              "leftValue": "={{$json.source}}",
-              "rightValue": "hn",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              }
-            }
-          ]
-        }
-      }
-    },
-    {
-      "id": "fetch-article",
-      "name": "Fetch article",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.4,
-      "position": [
-        840,
-        -140
-      ],
-      "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 2000,
-      "onError": "continueRegularOutput",
-      "parameters": {
-        "method": "GET",
-        "url": "={{$json.url}}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "User-Agent",
-              "value": "audio-brief-bot/0.1"
-            }
-          ]
-        },
-        "options": {
-          "response": {
-            "response": {
-              "responseFormat": "text"
-            }
-          },
-          "timeout": 20000
-        }
-      }
-    },
-    {
-      "id": "enrich-hn",
-      "name": "Enrich HN",
+      "id": "fin-enrich",
+      "name": "Enrich",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1020,
-        -140
-      ],
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "// Strip the HTML fetched by \"Fetch article\" into plain text content for the summarizer.\n// Falls back to title+snippet if the fetch failed (HTTP node onError=continueRegularOutput).\n\nfunction stripHtml(value) {\n  return String(value || '')\n    .replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')\n    .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ')\n    .replace(/<noscript[\\s\\S]*?<\\/noscript>/gi, ' ')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nreturn $input.all().map(entry => {\n  const meta = entry.json;\n  const fetched = typeof meta.data === 'string' ? stripHtml(meta.data).slice(0, 18000) : '';\n  const content = (fetched || [meta.title, meta.snippet].filter(Boolean).join('\\n\\n')).slice(0, 18000);\n  const { data, ...rest } = meta;\n  return { json: { ...rest, content } };\n});\n"
-      }
-    },
-    {
-      "id": "enrich-yt",
-      "name": "Enrich YT",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        840,
-        140
-      ],
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "// YouTube items: build content from the video's own description (media:description in the\n// feed). Strip sponsor URLs so the summarizer focuses on the actual topic. No placeholder\n// meta-text (it used to make the LLM think there was no content -> generic \"video available\").\n\nfunction stripUrls(s) {\n  return String(s || '').replace(/https?:\\/\\/\\S+/g, ' ').replace(/\\s+/g, ' ').trim();\n}\n\nreturn $input.all().map(entry => {\n  const item = entry.json;\n  const desc = stripUrls(item.snippet || '');\n  const content = [\n    item.title,\n    item.channel ? `Kanal YouTube: ${item.channel}` : '',\n    desc\n  ].filter(Boolean).join('\\n\\n').slice(0, 18000);\n  return { json: { ...item, content } };\n});\n"
-      }
-    },
-    {
-      "id": "merge-enriched",
-      "name": "Merge enriched",
-      "type": "n8n-nodes-base.merge",
-      "typeVersion": 3.2,
-      "position": [
-        1200,
+        580,
         0
       ],
       "parameters": {
-        "mode": "append",
-        "numberInputs": 2
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Finance enrich: build content from title + source + snippet (no article fetch — RSS\n// descriptions / video metadata are enough and avoid paywall/JS-fetch failures).\n\nreturn $input.all().map(entry => {\n  const item = entry.json;\n  const content = [\n    item.title,\n    item.channel ? `Kanal: ${item.channel}` : (item.source === 'news' ? 'Zrodlo: wiadomosci rynkowe' : ''),\n    item.snippet\n  ].filter(Boolean).join('\\n\\n').slice(0, 6000);\n  return { json: { ...item, content } };\n});\n"
       }
     },
     {
-      "id": "build-summary-input",
+      "id": "fin-build-summary-input",
       "name": "Build summary input",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1380,
+        760,
         0
       ],
       "parameters": {
@@ -313,12 +227,12 @@
       }
     },
     {
-      "id": "gcp-token-summary",
+      "id": "fin-token-summary",
       "name": "Get GCP token summary",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        1560,
+        940,
         0
       ],
       "retryOnFail": true,
@@ -346,12 +260,12 @@
       }
     },
     {
-      "id": "llm-summary",
+      "id": "fin-llm-summary",
       "name": "LLM summarize cheap",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        1740,
+        1120,
         0
       ],
       "retryOnFail": true,
@@ -380,12 +294,12 @@
       }
     },
     {
-      "id": "parse-summaries",
+      "id": "fin-parse-summaries",
       "name": "Parse summaries",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1920,
+        1300,
         0
       ],
       "parameters": {
@@ -394,26 +308,26 @@
       }
     },
     {
-      "id": "build-script-input",
+      "id": "fin-build-script-input",
       "name": "Build script input",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2100,
+        1480,
         0
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const summaries = $input.all().map(item => item.json);\n\nif (!summaries.length) throw new Error('No summaries available for script generation');\n\nconst system = `Tworzysz mowiony brief po polsku w stylu: konkretny, rzeczowy, z lekkim dystansem, ale rozwiniety (nie skrotowy).\nStruktura: intro -> segmenty tematyczne wedlug waznosci (kazdy temat rozwin: co sie stalo, dlaczego to wazne, jaki kontekst wynika z dostarczonych punktow) -> zwiezle zamkniecie.\nDLUGOSC: mowiony brief na 7-10 minut, czyli okolo 1000-1400 slow. Skaluj do ilosci materialu: duzo tresci -> blizej 10 minut (~1400 slow); malo tresci -> okolo 7 minut (~1000 slow), ale nie schodz ponizej ~950 slow. Rozwijaj kazdy temat kilkoma zdaniami zamiast jednego.\nZasady twarde:\n- Rozwijaj WYLACZNIE na bazie dostarczonych punktow; nie dodawaj wiedzy zewnetrznej i nie zmyslaj faktow.\n- Jesli czegos brak w punktach, pomin temat zamiast lac wode.\n- Nie wstawiaj URL ani znacznikow zrodel do mowionego tekstu.\nZwroc JSON: {\"script\":\"<czysty tekst do TTS>\",\"show_notes\":[{\"title\":\"...\",\"url\":\"...\"}]}`;\n\nreturn [{\n  json: {\n    summaries,\n    requestBody: {\n      contents: [{\n        role: 'user',\n        parts: [{ text: JSON.stringify({ summaries }) }]\n      }],\n      systemInstruction: { parts: [{ text: system }] },\n      generationConfig: {\n        temperature: 0.35,\n        maxOutputTokens: 16384,\n        thinkingConfig: { thinkingBudget: 2048 },\n        responseMimeType: 'application/json'\n      }\n    }\n  }\n}];\n"
+        "jsCode": "// Finance spoken-brief script (Polish). Kept short (~300 words) to respect the ElevenLabs\n// character quota. NOTE: env access is blocked on this n8n -> literals.\n\nconst summaries = $input.all().map(item => item.json);\n\nif (!summaries.length) throw new Error('No summaries available for script generation');\n\nconst system = `Tworzysz mowiony, cotygodniowy brief finansowy po polsku: konkretny, rzeczowy, z lekkim dystansem, ale rozwiniety (nie skrotowy).\nStruktura: intro -> segmenty tematyczne wedlug istotnosci rynkowej (kazdy temat rozwin: co sie stalo, dlaczego wazne dla rynkow, jaki kontekst wynika z dostarczonych punktow) -> zwiezle zamkniecie.\nDLUGOSC: mowiony brief na 7-10 minut, czyli okolo 1000-1400 slow. Skaluj do ilosci materialu: duzo tresci -> blizej 10 minut; malo tresci -> okolo 7 minut, ale nie schodz ponizej ~950 slow. Rozwijaj kazdy temat kilkoma zdaniami.\nZasady twarde:\n- Rozwijaj WYLACZNIE na bazie dostarczonych punktow; nie dodawaj wiedzy zewnetrznej ani nie zmyslaj faktow.\n- Nie podawaj porad inwestycyjnych ani rekomendacji kupna/sprzedazy.\n- Jesli czegos brak w punktach, pomin temat zamiast lac wode.\n- Nie wstawiaj URL ani znacznikow zrodel do mowionego tekstu.\nZwroc JSON: {\"script\":\"<czysty tekst do TTS>\",\"show_notes\":[{\"title\":\"...\",\"url\":\"...\"}]}`;\n\nreturn [{\n  json: {\n    summaries,\n    requestBody: {\n      contents: [{ role: 'user', parts: [{ text: JSON.stringify({ summaries }) }] }],\n      systemInstruction: { parts: [{ text: system }] },\n      generationConfig: {\n        temperature: 0.3,\n        maxOutputTokens: 16384,\n        thinkingConfig: { thinkingBudget: 2048 },\n        responseMimeType: 'application/json'\n      }\n    }\n  }\n}];\n"
       }
     },
     {
-      "id": "gcp-token-script",
+      "id": "fin-token-script",
       "name": "Get GCP token script",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        2280,
+        1660,
         0
       ],
       "retryOnFail": true,
@@ -441,12 +355,12 @@
       }
     },
     {
-      "id": "llm-script",
+      "id": "fin-llm-script",
       "name": "LLM script strong",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        2460,
+        1840,
         0
       ],
       "retryOnFail": true,
@@ -475,12 +389,12 @@
       }
     },
     {
-      "id": "parse-script",
+      "id": "fin-parse-script",
       "name": "Parse script",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2640,
+        2020,
         0
       ],
       "parameters": {
@@ -489,26 +403,26 @@
       }
     },
     {
-      "id": "ai-tts-req",
+      "id": "fin-tts-req",
       "name": "Build TTS request",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2820,
+        2200,
         0
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const input = $input.first().json;\nconst generatedAt = input.generatedAt || new Date().toISOString();\nconst ts = Math.floor(Date.parse(generatedAt) / 1000);\nconst bucket = 'dcs-ai-news-briefs';\nconst objectName = `brief_${ts}.mp3`;\nconst MAX_CHARS = 9500; // safety cap (~10 min of audio)\nlet script = String(input.script || '').trim();\nif (!script) throw new Error('No script text for TTS');\nif (script.length > MAX_CHARS) {\n  const head = script.slice(0, MAX_CHARS);\n  const cut = Math.max(head.lastIndexOf('. '), head.lastIndexOf('! '), head.lastIndexOf('? '));\n  script = cut > 400 ? head.slice(0, cut + 1) : head;\n}\nreturn [{ json: { script, chars: script.length, show_notes: input.show_notes || [], generatedAt, ts, bucket, objectName,\n  gcsUri: `gs://${bucket}/${objectName}`,\n  requestBody: { text: script, model_id: 'eleven_multilingual_v2', language_code: 'pl', voice_settings: { stability: 0.5, similarity_boost: 0.8 } } } }];\n"
+        "jsCode": "const input = $input.first().json;\nconst generatedAt = input.generatedAt || new Date().toISOString();\nconst ts = Math.floor(Date.parse(generatedAt) / 1000);\nconst bucket = 'dcs-ai-news-briefs';\nconst objectName = `fin_brief_${ts}.mp3`;\nconst MAX_CHARS = 9500; // safety cap (~10 min of audio)\nlet script = String(input.script || '').trim();\nif (!script) throw new Error('No script text for TTS');\nif (script.length > MAX_CHARS) {\n  const head = script.slice(0, MAX_CHARS);\n  const cut = Math.max(head.lastIndexOf('. '), head.lastIndexOf('! '), head.lastIndexOf('? '));\n  script = cut > 400 ? head.slice(0, cut + 1) : head;\n}\nreturn [{ json: { script, chars: script.length, show_notes: input.show_notes || [], generatedAt, ts, bucket, objectName,\n  gcsUri: `gs://${bucket}/${objectName}`,\n  requestBody: { text: script, model_id: 'eleven_multilingual_v2', language_code: 'pl', voice_settings: { stability: 0.5, similarity_boost: 0.8 } } } }];\n"
       }
     },
     {
-      "id": "ai-token-upload",
+      "id": "fin-token-upload",
       "name": "Get GCP token upload",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        3000,
+        2380,
         0
       ],
       "retryOnFail": true,
@@ -536,12 +450,12 @@
       }
     },
     {
-      "id": "ai-elevenlabs",
+      "id": "fin-elevenlabs",
       "name": "ElevenLabs TTS",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        3180,
+        2560,
         0
       ],
       "retryOnFail": true,
@@ -585,12 +499,12 @@
       }
     },
     {
-      "id": "ai-gcs-upload",
+      "id": "fin-gcs-upload",
       "name": "Upload to GCS",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        3360,
+        2740,
         0
       ],
       "retryOnFail": true,
@@ -619,12 +533,12 @@
       }
     },
     {
-      "id": "ai-build-signed-url",
+      "id": "fin-build-signed-url",
       "name": "Build signed url",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3600,
+        2980,
         -160
       ],
       "parameters": {
@@ -633,12 +547,12 @@
       }
     },
     {
-      "id": "ai-token-sign",
+      "id": "fin-token-sign",
       "name": "Get GCP token sign",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        3780,
+        3160,
         -160
       ],
       "retryOnFail": true,
@@ -666,12 +580,12 @@
       }
     },
     {
-      "id": "ai-sign-blob",
+      "id": "fin-sign-blob",
       "name": "Sign blob",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        3960,
+        3340,
         -160
       ],
       "retryOnFail": true,
@@ -706,12 +620,12 @@
       }
     },
     {
-      "id": "ai-assemble-signed-url",
+      "id": "fin-assemble-signed-url",
       "name": "Assemble signed url",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4140,
+        3520,
         -160
       ],
       "parameters": {
@@ -720,26 +634,26 @@
       }
     },
     {
-      "id": "ai-build-slack-digest",
+      "id": "fin-build-slack-digest",
       "name": "Build Slack digest",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4320,
+        3700,
         -160
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Compose the #ai-news message: a headline digest (one line per selected item, title linked\n// to its source — YouTube video or article) plus the signed audio link. Slack mrkdwn text\n// mode renders <url|label> links; the audio file itself is never uploaded — only the link.\n\nconst sig = $input.first().json;\nconst summaries = $('Parse summaries').all().map(i => i.json);\nconst enriched = $('Build summary input').first().json.enrichedItems || [];\nconst day = new Date(sig.generatedAt || Date.now()).toISOString().slice(0, 10);\n\n// authoritative source urls (from the pipeline, not the LLM echo): match by id, then title\nconst norm = t => String(t || '').toLowerCase().replace(/\\s+/g, ' ').trim();\nconst urlById = new Map(enriched.map(i => [String(i.id), i.url]));\nconst urlByTitle = new Map(enriched.map(i => [norm(i.title), i.url]));\nfunction cleanLabel(s) { return String(s || '').replace(/[*_~`<>|]/g, '').trim(); }\nfunction cleanUrl(u) { return /^https?:\\/\\//i.test(String(u || '')) ? String(u).trim() : ''; }\n\nconst lines = summaries.slice(0, 12).map(s => {\n  const title = cleanLabel(s.title || 'pozycja');\n  const point = (s.bullets && s.bullets[0]) ? cleanLabel(s.bullets[0]) : '';\n  const url = cleanUrl(urlById.get(String(s.id)) || urlByTitle.get(norm(s.title)) || s.source_url);\n  const head = url ? `<${url}|${title}>` : `*${title}*`;\n  return `• ${head}${point ? ' — ' + point : ''}`;\n});\n\nconst body = lines.length ? lines.join('\\n') : '_Brak nowych pozycji w tym tygodniu._';\nconst text = `🧠 *AI Brief — ${day}*\\n${body}\\n\\n🎧 <${sig.signedUrl}|Pobierz audio> · link ważny 7 dni`;\n\nconst processedIds = enriched.map(i => i.id);\n\nreturn [{\n  json: {\n    channel: 'C0BCWHAHJRW',\n    text,\n    processedIds,\n    signedUrl: sig.signedUrl\n  }\n}];\n"
+        "jsCode": "// Finance digest for #finance-news: headline list (title linked to its source — YouTube video\n// or article) + signed audio link (mp3, ElevenLabs).\n// NOTE: env access is blocked on this n8n -> channel id is literal.\n\nconst sig = $input.first().json;\nconst summaries = $('Parse summaries').all().map(i => i.json);\nconst enriched = $('Build summary input').first().json.enrichedItems || [];\nconst day = new Date(sig.generatedAt || Date.now()).toISOString().slice(0, 10);\n\nconst norm = t => String(t || '').toLowerCase().replace(/\\s+/g, ' ').trim();\nconst urlById = new Map(enriched.map(i => [String(i.id), i.url]));\nconst urlByTitle = new Map(enriched.map(i => [norm(i.title), i.url]));\nfunction cleanLabel(s) { return String(s || '').replace(/[*_~`<>|]/g, '').trim(); }\nfunction cleanUrl(u) { return /^https?:\\/\\//i.test(String(u || '')) ? String(u).trim() : ''; }\n\nconst lines = summaries.slice(0, 8).map(s => {\n  const title = cleanLabel(s.title || 'pozycja');\n  const point = (s.bullets && s.bullets[0]) ? cleanLabel(s.bullets[0]) : '';\n  const url = cleanUrl(urlById.get(String(s.id)) || urlByTitle.get(norm(s.title)) || s.source_url);\n  const head = url ? `<${url}|${title}>` : `*${title}*`;\n  return `• ${head}${point ? ' — ' + point : ''}`;\n});\n\nconst body = lines.length ? lines.join('\\n') : '_Brak nowych pozycji w tym tygodniu._';\nconst text = `📈 *Brief finansowy — ${day}*\\n${body}\\n\\n🎧 <${sig.signedUrl}|Pobierz audio> · link ważny 7 dni`;\n\nconst processedIds = enriched.map(i => i.id);\n\nreturn [{\n  json: {\n    channel: 'C0BBWESNQ4B',\n    text,\n    processedIds,\n    signedUrl: sig.signedUrl\n  }\n}];\n"
       }
     },
     {
-      "id": "ai-slack-post",
-      "name": "Post to ai-news",
+      "id": "fin-slack-post",
+      "name": "Post to finance-news",
       "type": "n8n-nodes-base.slack",
       "typeVersion": 2.4,
       "position": [
-        4500,
+        3880,
         -160
       ],
       "credentials": {
@@ -765,12 +679,12 @@
       }
     },
     {
-      "id": "ai-commit-state",
+      "id": "fin-commit-state",
       "name": "Commit state",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4680,
+        4060,
         -160
       ],
       "parameters": {
@@ -872,65 +786,14 @@
       "main": [
         [
           {
-            "node": "Route source",
+            "node": "Enrich",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Route source": {
-      "main": [
-        [
-          {
-            "node": "Fetch article",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Enrich YT",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Fetch article": {
-      "main": [
-        [
-          {
-            "node": "Enrich HN",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Enrich HN": {
-      "main": [
-        [
-          {
-            "node": "Merge enriched",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Enrich YT": {
-      "main": [
-        [
-          {
-            "node": "Merge enriched",
-            "type": "main",
-            "index": 1
-          }
-        ]
-      ]
-    },
-    "Merge enriched": {
+    "Enrich": {
       "main": [
         [
           {
@@ -1121,14 +984,14 @@
       "main": [
         [
           {
-            "node": "Post to ai-news",
+            "node": "Post to finance-news",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Post to ai-news": {
+    "Post to finance-news": {
       "main": [
         [
           {

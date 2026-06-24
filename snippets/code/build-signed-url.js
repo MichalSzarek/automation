@@ -69,7 +69,7 @@ function enc(s) {
 function encPath(p) { return p.split('/').map(enc).join('/'); }
 function pad(n) { return String(n).padStart(2, '0'); }
 
-const carry = $input.first().json;
+const carry = $('Build TTS request').first().json;
 const sa = 'maths-vm-sa@data-concept-studio.iam.gserviceaccount.com';
 const bucket = carry.bucket;
 const object = carry.objectName;
