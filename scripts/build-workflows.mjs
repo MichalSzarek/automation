@@ -373,3 +373,83 @@ const finWorkflow = {
 
 writeFileSync(join(root, 'workflows', 'finance-brief.json'), `${JSON.stringify(finWorkflow, null, 2)}\n`);
 console.log(`built workflows/finance-brief.json (TTS: ${FIN_TTS_ENGINE})`);
+
+// ============================== Finance podcast pipeline ==============================
+// Two-host conversational podcast (male + female ElevenLabs voices) via the Text-to-Dialogue
+// API (one call -> one two-voice mp3). Same finance sources as the brief; weekly Mon 09:00.
+const podNodes = [
+  { id: 'pod-schedule', name: 'Weekly schedule', type: 'n8n-nodes-base.scheduleTrigger', typeVersion: 1.3,
+    position: [-1040, 0], parameters: { rule: { interval: [{ field: 'cronExpression', expression: '0 9 * * 1' }] } } },
+  codeNode('pod-init-state', 'Init state', 'init-state.js', [-860, 0]),
+  codeNode('pod-build-source-urls', 'Build source URLs', 'fin-build-source-urls.js', [-680, 0]),
+  {
+    id: 'pod-fetch-source', name: 'Fetch source', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.4,
+    position: [-500, 0], retryOnFail: true, maxTries: 3, waitBetweenTries: 2000, onError: 'continueRegularOutput',
+    parameters: { method: 'GET', url: '={{$json.url}}', sendHeaders: true,
+      headerParameters: { parameters: [{ name: 'User-Agent', value: 'finance-podcast-bot/0.1' }] },
+      options: { response: { response: { responseFormat: 'text' } }, batching: { batch: { batchSize: 3, batchInterval: 500 } } } }
+  },
+  codeNode('pod-parse-candidates', 'Parse candidates', 'fin-parse-candidates.js', [-320, 0]),
+  codeNode('pod-build-filter-input', 'Build filter input', 'fin-build-filter-input.js', [-140, 0]),
+  tokenNode('pod-token-filter', 'Get GCP token filter', [40, 0]),
+  llmNode('pod-llm-filter', 'LLM filter cheap', [220, 0], 'LLM_MODEL_CHEAP', 'Build filter input', 'Get GCP token filter'),
+  codeNode('pod-parse-select', 'Parse selected', 'parse-select.js', [400, 0]),
+  codeNode('pod-enrich', 'Enrich', 'fin-enrich.js', [580, 0]),
+  codeNode('pod-build-summary-input', 'Build summary input', 'build-summary-input.js', [760, 0]),
+  tokenNode('pod-token-summary', 'Get GCP token summary', [940, 0]),
+  llmNode('pod-llm-summary', 'LLM summarize cheap', [1120, 0], 'LLM_MODEL_CHEAP', 'Build summary input', 'Get GCP token summary'),
+  codeNode('pod-parse-summaries', 'Parse summaries', 'parse-summaries.js', [1300, 0]),
+  codeNode('pod-build-script-input', 'Build script input', 'pod-build-script-input.js', [1480, 0]),
+  tokenNode('pod-token-script', 'Get GCP token script', [1660, 0]),
+  llmNode('pod-llm-script', 'LLM script strong', [1840, 0], 'LLM_MODEL_STRONG', 'Build script input', 'Get GCP token script'),
+  codeNode('pod-parse-script', 'Parse script', 'pod-parse-script.js', [2020, 0]),
+  codeNode('pod-build-tts', 'Build TTS request', 'pod-build-dialogue.js', [2200, 0]),
+  tokenNode('pod-token-upload', 'Get GCP token upload', [2380, 0]),
+  {
+    id: 'pod-dialogue', name: 'Dialogue TTS', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.4,
+    position: [2560, 0], retryOnFail: true, maxTries: 2, waitBetweenTries: 3000,
+    credentials: { httpHeaderAuth: { id: ELEVEN_CRED_ID, name: 'ElevenLabs API' } },
+    parameters: {
+      method: 'POST', url: 'https://api.elevenlabs.io/v1/text-to-dialogue',
+      authentication: 'genericCredentialType', genericAuthType: 'httpHeaderAuth',
+      sendHeaders: true,
+      headerParameters: { parameters: [{ name: 'Accept', value: 'audio/mpeg' }, { name: 'Content-Type', value: 'application/json' }] },
+      sendBody: true, specifyBody: 'json',
+      jsonBody: '={{JSON.stringify($node["Build TTS request"].json.requestBody)}}',
+      options: { response: { response: { responseFormat: 'file', outputPropertyName: 'audio' } }, timeout: 240000 }
+    }
+  },
+  {
+    id: 'pod-gcs-upload', name: 'Upload to GCS', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.4,
+    position: [2740, 0], retryOnFail: true, maxTries: 3, waitBetweenTries: 2000,
+    parameters: {
+      method: 'POST',
+      url: '={{"https://storage.googleapis.com/upload/storage/v1/b/" + $node["Build TTS request"].json.bucket + "/o?uploadType=media&name=" + encodeURIComponent($node["Build TTS request"].json.objectName)}}',
+      sendHeaders: true,
+      headerParameters: { parameters: [
+        { name: 'Authorization', value: '=Bearer {{$node["Get GCP token upload"].json.access_token}}' },
+        { name: 'Content-Type', value: 'audio/mpeg' } ] },
+      sendBody: true, contentType: 'binaryData', inputDataFieldName: 'audio', options: {}
+    }
+  },
+  ...signSlackCommit('pod', 'Post to podcast', 'pod-build-slack-digest.js', 2980)
+];
+
+const podConnections = {
+  ...connect(['Weekly schedule', 'Init state', 'Build source URLs', 'Fetch source', 'Parse candidates',
+    'Build filter input', 'Get GCP token filter', 'LLM filter cheap', 'Parse selected', 'Enrich',
+    'Build summary input', 'Get GCP token summary', 'LLM summarize cheap', 'Parse summaries',
+    'Build script input', 'Get GCP token script', 'LLM script strong', 'Parse script',
+    'Build TTS request', 'Get GCP token upload', 'Dialogue TTS', 'Upload to GCS', 'Build signed url']),
+  ...signSlackConns('Post to podcast')
+};
+
+const podWorkflow = {
+  name: 'Finance Podcast - 2 voices (ElevenLabs Dialogue)',
+  nodes: podNodes,
+  connections: podConnections,
+  settings: { executionOrder: 'v1', timezone: 'Europe/Warsaw', saveDataErrorExecution: 'all', saveDataSuccessExecution: 'none' }
+};
+
+writeFileSync(join(root, 'workflows', 'finance-podcast.json'), `${JSON.stringify(podWorkflow, null, 2)}\n`);
+console.log('built workflows/finance-podcast.json (TTS: elevenlabs dialogue, 2 voices)');

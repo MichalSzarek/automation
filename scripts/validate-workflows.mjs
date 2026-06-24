@@ -26,15 +26,21 @@ const requiredFiles = [
   'snippets/code/fin-enrich.js',
   'snippets/code/fin-build-script-input.js',
   'snippets/code/fin-build-slack-digest.js',
+  'snippets/code/pod-build-script-input.js',
+  'snippets/code/pod-parse-script.js',
+  'snippets/code/pod-build-dialogue.js',
+  'snippets/code/pod-build-slack-digest.js',
   'workflows/personal-audio-brief.json',
-  'workflows/finance-brief.json'
+  'workflows/finance-brief.json',
+  'workflows/finance-podcast.json'
 ];
 
 // per-workflow required + banned node names (engine-agnostic: both pipelines expose a
 // unified "Build TTS request" node regardless of TTS engine).
 const workflowChecks = {
   'personal-audio-brief.json': { require: ['Post to ai-news', 'Build TTS request', 'Build signed url'], ban: ['Upload audio to S3', 'Build RSS', 'Respond RSS', 'Feed webhook', 'Smoke webhook', 'Post to finance-news'] },
-  'finance-brief.json': { require: ['Post to finance-news', 'Build TTS request', 'Build signed url'], ban: ['Smoke webhook', 'Post to ai-news'] }
+  'finance-brief.json': { require: ['Post to finance-news', 'Build TTS request', 'Build signed url'], ban: ['Smoke webhook', 'Post to ai-news'] },
+  'finance-podcast.json': { require: ['Post to podcast', 'Build TTS request', 'Dialogue TTS', 'Build signed url'], ban: ['Smoke webhook', 'Post to ai-news', 'Post to finance-news'] }
 };
 
 let failures = 0;
